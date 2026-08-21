@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Optic — send files with light</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+  :root{
+    --bg:#10131a; --panel:#171b24; --panel-alt:#1e2430; --border:#2a3140;
+    --text:#e9ecf2; --muted:#8992a6; --signal:#4fd8c4; --warm:#f2a93b; --danger:#f2555a;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:'Inter',system-ui,sans-serif;
+    min-height:100vh; display:flex; justify-content:center;
+    padding:20px 14px 40px;
+  }
+  .app{width:100%; max-width:440px;}
+  header.top{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px;}
+  .wordmark{font-family:'JetBrains Mono',monospace; font-weight:700; font-size:20px; letter-spacing:0.02em;}
+  .wordmark span{color:var(--signal);}
+  .tagline{color:var(--muted); font-size:12.5px; margin-top:2px;}
+
+  .tabs{display:flex; background:var(--panel); border:1px solid var(--border); border-radius:999px; padding:4px; margin-bottom:18px;}
+  .tab{flex:1; text-align:center; padding:9px 0; border-radius:999px; font-size:14px; font-weight:600; cursor:pointer; color:var(--muted); user-select:none; transition:background .15s, color .15s;}
+  .tab.active{background:var(--panel-alt); color:var(--text);}
+  .tab[data-tab="receive"].active{color:var(--signal);}
+  .tab[data-tab="send"].active{color:var(--warm);}
+
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  .stage-wrap{position:relative; width:100%; aspect-ratio:1/1; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; display:flex; align-items:center; justify-content:center; margin-bottom:14px;}
+  .stage-wrap canvas{image-rendering:pixelated; max-width:88%; max-height:88%; background:#fff; border-radius:4px;}
+  .stage-wrap video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover;}
+  .empty-hint{color:var(--muted); font-size:13px; text-align:center; padding:0 30px; font-family:'JetBrains Mono',monospace;}
+
+  .bracket{position:absolute; width:26px; height:26px; border-color:var(--border); opacity:.6; transition:border-color .2s, opacity .2s;}
+  .bracket.tl{top:10px; left:10px; border-top:2px solid; border-left:2px solid; border-radius:6px 0 0 0;}
+  .bracket.tr{top:10px; right:10px; border-top:2px solid; border-right:2px solid; border-radius:0 6px 0 0;}
+  .bracket.bl{bottom:10px; left:10px; border-bottom:2px solid; border-left:2px solid; border-radius:0 0 0 6px;}
+  .bracket.br{bottom:10px; right:10px; border-bottom:2px solid; border-right:2px solid; border-radius:0 0 6px 0;}
+  .stage-wrap.active .bracket{border-color:var(--signal); opacity:1;}
+  .stage-wrap.send-active .bracket{border-color:var(--warm);}
+
+  .scanline{position:absolute; left:6%; right:6%; height:2px; background:linear-gradient(90deg, transparent, var(--signal), transparent); opacity:0; pointer-events:none;}
+  .stage-wrap.send-active .scanline{background:linear-gradient(90deg, transparent, var(--warm), transparent);}
+  .stage-wrap.active .scanline{opacity:.85; animation:sweep 2.2s linear infinite;}
+  @keyframes sweep{ 0%{top:8%;} 50%{top:92%;} 100%{top:8%;} }
+  @media (prefers-reduced-motion: reduce){ .scanline{animation:none !important; opacity:.4;} }
+
+  .controls{display:flex; flex-direction:column; gap:10px; margin-bottom:16px;}
+  .file-row{display:flex; align-items:center; gap:10px;}
+  .btn{border:1px solid var(--border); background:var(--panel-alt); color:var(--text); padding:11px 16px; border-radius:10px; font-family:'Inter',sans-serif; font-weight:600; font-size:14px; cursor:pointer; transition:filter .15s, transform .05s;}
+  .btn:active{transform:scale(.98);}
+  .btn:hover{filter:brightness(1.15);}
+  .btn.primary-send{background:var(--warm); color:#1a1206; border-color:var(--warm);}
+  .btn.primary-recv{background:var(--signal); color:#06231e; border-color:var(--signal);}
+  .btn.stop{background:var(--danger); color:#2a0a0c; border-color:var(--danger);}
+  .btn.ghost{background:transparent;}
+  .btn:disabled{opacity:.4; cursor:not-allowed; filter:none;}
+  .btn.full{width:100%;}
+
+  .file-meta{font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--muted); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+  details.settings{border:1px solid var(--border); border-radius:10px; background:var(--panel); padding:2px 12px;}
+  details.settings summary{padding:9px 0; font-size:13px; color:var(--muted); cursor:pointer; font-weight:600;}
+  .setting-row{display:flex; justify-content:space-between; align-items:center; margin:10px 0; gap:12px;}
+  .setting-row label{font-size:13px; color:var(--muted);}
+  .setting-row .val{font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--text); min-width:56px; text-align:right;}
+  input[type=range]{flex:1; accent-color:var(--signal);}
+  select{background:var(--panel-alt); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-family:'JetBrains Mono',monospace; font-size:12.5px;}
+
+  .telemetry{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px 14px; font-family:'JetBrains Mono',monospace; font-size:12.5px; margin-bottom:14px;}
+  .telemetry .row{display:flex; justify-content:space-between; padding:3px 0; color:var(--muted);}
+  .telemetry .row b{color:var(--text); font-weight:600;}
+  .progress-bar{height:6px; border-radius:4px; background:var(--panel-alt); overflow:hidden; margin:8px 0 4px;}
+  .progress-fill{height:100%; background:var(--signal); width:0%; transition:width .2s;}
+  .send-active .progress-fill{background:var(--warm);}
+
+  .status-line{font-size:13px; color:var(--muted); margin-bottom:10px; min-height:18px;}
+  .status-line.err{color:var(--danger);}
+  .status-line.ok{color:var(--signal);}
+
+  .result-card{display:none; border:1px solid var(--border); border-radius:10px; background:var(--panel); padding:14px; margin-bottom:14px;}
+  .result-card.show{display:block;}
+  .result-card .name{font-weight:600; font-size:14px; margin-bottom:4px; word-break:break-all;}
+  .result-card .chk{font-size:12.5px; font-family:'JetBrains Mono',monospace; margin-bottom:10px;}
+  .result-card .chk.ok{color:var(--signal);}
+  .result-card .chk.bad{color:var(--danger);}
+
+  .help{color:var(--muted); font-size:12px; line-height:1.6; margin-top:6px;}
+  .help b{color:var(--text);}
+  footer{color:var(--muted); font-size:11px; text-align:center; margin-top:22px; line-height:1.6;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <div>
+      <div class="wordmark">OPT<span>IC</span></div>
+      <div class="tagline">Send files with light, not signal.</div>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="send">Send</div>
+    <div class="tab" data-tab="receive">Receive</div>
+  </div>
+
+  <!-- SEND -->
+  <section class="panel active" id="panel-send">
+    <div class="stage-wrap" id="sendStage">
+      <div class="bracket tl"></div><div class="bracket tr"></div>
+      <div class="bracket bl"></div><div class="bracket br"></div>
+      <div class="scanline"></div>
+      <canvas id="qrCanvas" width="380" height="380" style="display:none;"></canvas>
+      <div class="empty-hint" id="sendEmptyHint">Choose a file to begin.<br>It'll appear here as a stream of QR codes.</div>
+    </div>
+
+    <div class="controls">
+      <div class="file-row">
+        <button class="btn" id="chooseFileBtn">Choose file</button>
+        <div class="file-meta" id="fileMeta">No file selected</div>
+      </div>
+      <input type="file" id="fileInput" style="display:none;">
+
+      <details class="settings">
+        <summary>Transfer settings</summary>
+        <div class="setting-row">
+          <label>Chunk size</label>
+          <input type="range" id="chunkSize" min="150" max="1000" step="10" value="350">
+          <div class="val" id="chunkSizeVal">350 B</div>
+        </div>
+        <div class="setting-row">
+          <label>Frame interval</label>
+          <input type="range" id="interval" min="80" max="600" step="10" value="220">
+          <div class="val" id="intervalVal">220 ms</div>
+        </div>
+        <div class="setting-row">
+          <label>Error correction</label>
+          <select id="ecLevel">
+            <option value="L">L — smallest code</option>
+            <option value="M" selected>M — balanced</option>
+            <option value="Q">Q — sturdier</option>
+            <option value="H">H — most robust</option>
+          </select>
+        </div>
+        <p class="help">Smaller chunks and a lower error-correction level make a smaller, easier-to-scan code but need more frames overall. If the receiving phone struggles to keep up, reduce chunk size or increase the interval.</p>
+      </details>
+
+      <button class="btn primary-send full" id="sendToggleBtn" disabled>Start sending</button>
+    </div>
+
+    <div class="status-line" id="sendStatus"></div>
+
+    <div class="telemetry" id="sendTelemetry" style="display:none;">
+      <div class="row"><span>frames sent</span><b id="tFrames">0</b></div>
+      <div class="row"><span>chunks (K)</span><b id="tK">0</b></div>
+      <div class="row"><span>elapsed</span><b id="tElapsed">00:00</b></div>
+      <div class="row"><span>transfer id</span><b id="tTransferId">—</b></div>
+    </div>
+
+    <p class="help">Hold the receiving phone's camera up to this screen, about 15–20cm away, screen brightness turned up. Sending loops the file continuously — press <b>Stop sending</b> once the other phone shows "Transfer complete."</p>
+  </section>
+
+  <!-- RECEIVE -->
+  <section class="panel" id="panel-receive">
+    <div class="stage-wrap" id="recvStage">
+      <div class="bracket tl"></div><div class="bracket tr"></div>
+      <div class="bracket bl"></div><div class="bracket br"></div>
+      <div class="scanline"></div>
+      <video id="video" playsinline muted style="display:none;"></video>
+      <div class="empty-hint" id="recvEmptyHint">Point your camera at the sending phone's screen.</div>
+    </div>
+
+    <button class="btn primary-recv full" id="scanToggleBtn">Start scanning</button>
+    <div class="status-line" id="recvStatus"></div>
+
+    <div class="telemetry" id="recvTelemetry" style="display:none;">
+      <div class="row"><span>chunks resolved</span><b id="rChunks">0 / 0</b></div>
+      <div class="progress-bar"><div class="progress-fill" id="rProgressFill"></div></div>
+      <div class="row"><span>frames read</span><b id="rFrames">0</b></div>
+      <div class="row"><span>elapsed</span><b id="rElapsed">00:00</b></div>
+    </div>
+
+    <div class="result-card" id="resultCard">
+      <div class="name" id="resultName"></div>
+      <div class="chk" id="resultChk"></div>
+      <div style="display:flex; gap:8px;">
+        <a class="btn primary-recv" id="saveLink" download style="text-decoration:none; text-align:center; flex:1;">Save file</a>
+        <button class="btn ghost" id="newTransferBtn">New transfer</button>
+      </div>
+    </div>
+
+    <p class="help">This page only needs the internet once, to load. The actual transfer happens through the camera — no wifi, Bluetooth, or signal required.<br><br><b>Camera needs a secure page.</b> Open this over <b>https://</b>, or via <b>localhost</b> if testing on one device. A plain <b>http://192.168.x.x</b> address won't prompt for camera access at all.</p>
+  </section>
+
+  <footer>Runs entirely in your browser. Files never leave your two phones.</footer>
+</div>
+
+<script>
+/* ============================================================
+   CORE PROTOCOL — fountain-coded (LT-style) QR packet framing.
+   Verified separately against a Node test harness before this
+   was wired into the UI. See project notes for the test suite.
+   ============================================================ */
+
+const MAGIC = 0xA5;
+const TYPE_META = 0;
+const TYPE_DATA = 1;
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function crc16(bytes) {
+  let crc = 0xFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i] << 8;
+    for (let b = 0; b < 8; b++) {
+      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+      crc &= 0xFFFF;
+    }
+  }
+  return crc;
+}
+
+function buildSolitonCDF(K, c = 0.05, delta = 0.5) {
+  if (K <= 1) return new Float64Array([0, 1]);
+  const rho = new Float64Array(K + 1);
+  rho[1] = 1 / K;
+  for (let i = 2; i <= K; i++) rho[i] = 1 / (i * (i - 1));
+  let R = c * Math.log(K / delta) * Math.sqrt(K);
+  R = Math.max(1, Math.min(R, K - 1));
+  const limit = Math.max(1, Math.min(K, Math.floor(K / R)));
+  const tau = new Float64Array(K + 1);
+  for (let i = 1; i < limit; i++) tau[i] = R / (K * i);
+  tau[limit] += (R * Math.log(R / delta)) / K;
+  const mu = new Float64Array(K + 1);
+  let Z = 0;
+  for (let i = 1; i <= K; i++) { mu[i] = rho[i] + tau[i]; Z += mu[i]; }
+  const cdf = new Float64Array(K + 1);
+  let acc = 0;
+  for (let i = 1; i <= K; i++) { acc += mu[i] / Z; cdf[i] = acc; }
+  cdf[K] = 1;
+  return cdf;
+}
+
+function sampleDegree(cdf, K, rng) {
+  if (K <= 1) return 1;
+  const x = rng();
+  let lo = 1, hi = K;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cdf[mid] >= x) hi = mid; else lo = mid + 1;
+  }
+  return lo;
+}
+
+function pickIndices(K, degree, rng) {
+  const d = Math.min(degree, K);
+  const arr = new Uint32Array(K);
+  for (let i = 0; i < K; i++) arr[i] = i;
+  for (let i = 0; i < d; i++) {
+    const j = i + Math.floor(rng() * (K - i));
+    const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+  return Array.from(arr.slice(0, d));
+}
+
+function degreeAndIndices(K, seed, cdf) {
+  const rng = mulberry32(seed);
+  if (K < 32) {
+    if (rng() < 0.6) return [1, [Math.floor(rng() * K)]];
+    return [2, pickIndices(K, 2, rng)];
+  }
+  const deg = sampleDegree(cdf, K, rng);
+  return [deg, pickIndices(K, deg, rng)];
+}
+
+function splitIntoChunks(bytes, chunkSize) {
+  const K = Math.max(1, Math.ceil(bytes.length / chunkSize));
+  const chunks = [];
+  for (let i = 0; i < K; i++) {
+    const c = new Uint8Array(chunkSize);
+    const start = i * chunkSize;
+    const end = Math.min(start + chunkSize, bytes.length);
+    c.set(bytes.subarray(start, end));
+    chunks.push(c);
+  }
+  return chunks;
+}
+
+function xorInto(target, src) { for (let i = 0; i < target.length; i++) target[i] ^= src[i]; }
+
+function encodeDataPacket(transferId, K, seed, chunks, chunkSize, cdf) {
+  const [degree, indices] = degreeAndIndices(K, seed, cdf);
+  const payload = new Uint8Array(chunkSize);
+  for (const idx of indices) xorInto(payload, chunks[idx]);
+
+  const header = new Uint8Array(12);
+  const dv = new DataView(header.buffer);
+  header[0] = MAGIC; header[1] = TYPE_DATA;
+  dv.setUint16(2, transferId, false);
+  dv.setUint16(4, K, false);
+  dv.setUint32(6, seed >>> 0, false);
+  dv.setUint16(10, degree, false);
+
+  const body = new Uint8Array(header.length + payload.length);
+  body.set(header, 0); body.set(payload, header.length);
+  const crc = crc16(body);
+  const out = new Uint8Array(body.length + 2);
+  out.set(body, 0);
+  new DataView(out.buffer).setUint16(body.length, crc, false);
+  return out;
+}
+
+function encodeMetaPacket(transferId, K, chunkSize, fileSize, fileName, sha256Bytes) {
+  const nameBytes = new TextEncoder().encode(fileName);
+  const bodyLen = 13 + nameBytes.length + 32;
+  const body = new Uint8Array(bodyLen);
+  const dv = new DataView(body.buffer);
+  body[0] = MAGIC; body[1] = TYPE_META;
+  dv.setUint16(2, transferId, false);
+  dv.setUint16(4, K, false);
+  dv.setUint16(6, chunkSize, false);
+  dv.setUint32(8, fileSize, false);
+  body[12] = nameBytes.length;
+  body.set(nameBytes, 13);
+  body.set(sha256Bytes, 13 + nameBytes.length);
+  const crc = crc16(body);
+  const out = new Uint8Array(body.length + 2);
+  out.set(body, 0);
+  new DataView(out.buffer).setUint16(body.length, crc, false);
+  return out;
+}
+
+function parsePacket(bytes) {
+  if (bytes.length < 5 || bytes[0] !== MAGIC) return null;
+  const body = bytes.subarray(0, bytes.length - 2);
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+  if (crc16(body) !== dv.getUint16(bytes.length - 2, false)) return null;
+  const type = bytes[1];
+  if (type === TYPE_DATA) {
+    if (bytes.length < 14) return null;
+    return {
+      type, transferId: dv.getUint16(2, false), K: dv.getUint16(4, false),
+      seed: dv.getUint32(6, false), degree: dv.getUint16(10, false),
+      payload: bytes.slice(12, bytes.length - 2),
+    };
+  }
+  if (type === TYPE_META) {
+    if (bytes.length < 47) return null;
+    const nameLen = bytes[12];
+    const nameEnd = 13 + nameLen;
+    return {
+      type, transferId: dv.getUint16(2, false), K: dv.getUint16(4, false),
+      chunkSize: dv.getUint16(6, false), fileSize: dv.getUint32(8, false),
+      fileName: new TextDecoder().decode(bytes.slice(13, nameEnd)),
+      sha256: bytes.slice(nameEnd, nameEnd + 32),
+    };
+  }
+  return null;
+}
+
+class LTDecoder {
+  constructor(K, chunkSize) {
+    this.K = K; this.chunkSize = chunkSize;
+    this.resolved = new Array(K).fill(null);
+    this.resolvedCount = 0;
+    this.pending = [];
+    this.seenSeeds = new Set();
+  }
+  isComplete() { return this.resolvedCount === this.K; }
+  addPacket(seed, indices, payload) {
+    if (this.seenSeeds.has(seed)) return;
+    this.seenSeeds.add(seed);
+    const idxSet = new Set(indices);
+    const data = payload.slice();
+    this._reduce(idxSet, data);
+    if (idxSet.size === 1) { const [only] = idxSet; this._resolve(only, data); }
+    else if (idxSet.size > 1) { this.pending.push({ indices: idxSet, data }); }
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = this.pending.length - 1; i >= 0; i--) {
+        const pkt = this.pending[i];
+        this._reduce(pkt.indices, pkt.data);
+        if (pkt.indices.size === 0) { this.pending.splice(i, 1); }
+        else if (pkt.indices.size === 1) {
+          const [only] = pkt.indices;
+          this._resolve(only, pkt.data);
+          this.pending.splice(i, 1);
+          changed = true;
+        }
+      }
+    }
+  }
+  _reduce(idxSet, data) {
+    for (const idx of Array.from(idxSet)) {
+      if (this.resolved[idx] !== null) { xorInto(data, this.resolved[idx]); idxSet.delete(idx); }
+    }
+  }
+  _resolve(idx, data) {
+    if (this.resolved[idx] !== null) return;
+    this.resolved[idx] = data; this.resolvedCount++;
+  }
+  assemble() {
+    if (!this.isComplete()) return null;
+    const out = new Uint8Array(this.K * this.chunkSize);
+    for (let i = 0; i < this.K; i++) out.set(this.resolved[i], i * this.chunkSize);
+    return out;
+  }
+}
+
+/* ============================================================
+   UI WIRING
+   ============================================================ */
+
+const META_EVERY = 6;
+
+// --- tabs ---
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+}));
+
+function fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(2) + ' MB';
+}
+function fmtElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+
+/* ---------------- SEND ---------------- */
+
+const chooseFileBtn = document.getElementById('chooseFileBtn');
+const fileInput = document.getElementById('fileInput');
+const fileMeta = document.getElementById('fileMeta');
+const sendToggleBtn = document.getElementById('sendToggleBtn');
+const sendStatus = document.getElementById('sendStatus');
+const sendStage = document.getElementById('sendStage');
+const qrCanvas = document.getElementById('qrCanvas');
+const sendEmptyHint = document.getElementById('sendEmptyHint');
+const chunkSizeInput = document.getElementById('chunkSize');
+const chunkSizeVal = document.getElementById('chunkSizeVal');
+const intervalInput = document.getElementById('interval');
+const intervalVal = document.getElementById('intervalVal');
+const ecLevelSelect = document.getElementById('ecLevel');
+const sendTelemetry = document.getElementById('sendTelemetry');
+
+let selectedFile = null;
+let sendState = null;
+
+chunkSizeInput.addEventListener('input', () => chunkSizeVal.textContent = chunkSizeInput.value + ' B');
+intervalInput.addEventListener('input', () => intervalVal.textContent = intervalInput.value + ' ms');
+
+chooseFileBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files && fileInput.files[0]) {
+    selectedFile = fileInput.files[0];
+    fileMeta.textContent = selectedFile.name + ' · ' + fmtBytes(selectedFile.size);
+    sendToggleBtn.disabled = false;
+    sendStatus.textContent = '';
+  }
+});
+
+sendToggleBtn.addEventListener('click', () => {
+  if (sendState && !sendState.stopped) stopSending(); else startSending();
+});
+
+async function startSending() {
+  if (!selectedFile) return;
+  sendStatus.className = 'status-line';
+  sendStatus.textContent = 'Preparing…';
+  const buf = new Uint8Array(await selectedFile.arrayBuffer());
+  const chunkSize = parseInt(chunkSizeInput.value, 10);
+  const chunks = splitIntoChunks(buf, chunkSize);
+  const K = chunks.length;
+  const cdf = buildSolitonCDF(K);
+  const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+  const hash = new Uint8Array(hashBuf);
+  const transferId = Math.floor(Math.random() * 65000) + 1;
+  const metaBytes = encodeMetaPacket(transferId, K, chunkSize, buf.length, selectedFile.name, hash);
+
+  sendState = {
+    chunks, K, chunkSize, cdf, transferId, metaBytes,
+    seed: Math.floor(Math.random() * 4294967295) >>> 0,
+    frameCount: 0, ecLevel: ecLevelSelect.value, intervalMs: parseInt(intervalInput.value, 10),
+    startTime: performance.now(), stopped: false,
+  };
+
+  sendEmptyHint.style.display = 'none';
+  qrCanvas.style.display = 'block';
+  sendStage.classList.add('active', 'send-active');
+  sendTelemetry.style.display = 'block';
+  document.getElementById('tK').textContent = K;
+  document.getElementById('tTransferId').textContent = transferId;
+  sendToggleBtn.textContent = 'Stop sending';
+  sendToggleBtn.classList.add('stop');
+  sendStatus.textContent = 'Sending — point the receiving phone\'s camera at this screen.';
+  chooseFileBtn.disabled = true;
+
+  scheduleSendTick();
+}
+
+function stopSending() {
+  if (sendState) sendState.stopped = true;
+  sendStage.classList.remove('active', 'send-active');
+  sendToggleBtn.textContent = 'Start sending';
+  sendToggleBtn.classList.remove('stop');
+  sendStatus.textContent = 'Stopped.';
+  chooseFileBtn.disabled = false;
+}
+
+async function scheduleSendTick() {
+  if (!sendState || sendState.stopped) return;
+  const s = sendState;
+  let payload;
+  if (s.frameCount % META_EVERY === 0) {
+    payload = s.metaBytes;
+  } else {
+    s.seed = (s.seed * 2654435761 + 1) >>> 0;
+    payload = encodeDataPacket(s.transferId, s.K, s.seed, s.chunks, s.chunkSize, s.cdf);
+  }
+  s.frameCount++;
+
+  try {
+    const size = Math.min(sendStage.clientWidth * 0.86, 380);
+    await QRCode.toCanvas(qrCanvas, [{ data: payload, mode: 'byte' }], {
+      errorCorrectionLevel: s.ecLevel, margin: 3, width: Math.round(size),
+    });
+  } catch (e) { /* skip a frame on render error, keep the loop alive */ }
+
+  document.getElementById('tFrames').textContent = s.frameCount;
+  document.getElementById('tElapsed').textContent = fmtElapsed(performance.now() - s.startTime);
+
+  setTimeout(scheduleSendTick, s.intervalMs);
+}
+
+/* ---------------- RECEIVE ---------------- */
+
+const scanToggleBtn = document.getElementById('scanToggleBtn');
+const recvStatus = document.getElementById('recvStatus');
+const recvStage = document.getElementById('recvStage');
+const video = document.getElementById('video');
+const recvEmptyHint = document.getElementById('recvEmptyHint');
+const recvTelemetry = document.getElementById('recvTelemetry');
+const resultCard = document.getElementById('resultCard');
+const saveLink = document.getElementById('saveLink');
+const newTransferBtn = document.getElementById('newTransferBtn');
+
+let recvState = null;
+const scanCanvas = document.createElement('canvas');
+const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+
+scanToggleBtn.addEventListener('click', () => {
+  if (recvState && recvState.active) stopScanning(); else startScanning();
+});
+newTransferBtn.addEventListener('click', () => {
+  resultCard.classList.remove('show');
+  if (recvState) recvState.session = null;
+  recvTelemetry.style.display = 'none';
+  recvStatus.textContent = '';
+  if (!recvState || !recvState.active) startScanning();
+});
+
+async function startScanning() {
+  recvStatus.className = 'status-line';
+
+  // Chrome/Safari won't even show the permission prompt on an insecure
+  // origin (plain http:// at anything other than localhost/127.0.0.1) —
+  // it just silently has no camera API. Catch that case explicitly rather
+  // than letting it look like nothing happened.
+  if (!window.isSecureContext) {
+    recvStatus.className = 'status-line err';
+    recvStatus.textContent = 'This page isn\u2019t loaded securely, so the browser won\u2019t offer camera access at all (no prompt, no error \u2014 just silence). Open it over https:// , or via "localhost" if you\u2019re testing on this device, instead of a plain http://<ip-address> URL. See the note below for options.';
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    recvStatus.className = 'status-line err';
+    recvStatus.textContent = 'This browser doesn\u2019t expose camera access here. Try the latest Chrome or Safari.';
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    });
+    video.srcObject = stream;
+    await video.play();
+    recvState = { session: null, stream, active: true };
+    recvEmptyHint.style.display = 'none';
+    video.style.display = 'block';
+    recvStage.classList.add('active');
+    scanToggleBtn.textContent = 'Stop scanning';
+    scanToggleBtn.classList.add('stop');
+    recvStatus.textContent = 'Scanning…';
+    resultCard.classList.remove('show');
+    requestAnimationFrame(scanTick);
+  } catch (e) {
+    recvStatus.className = 'status-line err';
+    if (e.name === 'NotAllowedError') {
+      recvStatus.textContent = 'Camera permission was denied. Open this site\u2019s settings in your browser (tap the icon left of the address bar) and allow camera access, then try again.';
+    } else if (e.name === 'NotFoundError') {
+      recvStatus.textContent = 'No camera was found on this device.';
+    } else if (e.name === 'NotReadableError') {
+      recvStatus.textContent = 'The camera is already in use by another app. Close it and try again.';
+    } else {
+      recvStatus.textContent = 'Camera error: ' + (e.message || e.name || 'unknown error') + '.';
+    }
+  }
+}
+
+function stopScanning() {
+  if (recvState) {
+    recvState.active = false;
+    recvState.stream.getTracks().forEach(t => t.stop());
+  }
+  video.style.display = 'none';
+  recvEmptyHint.style.display = 'block';
+  recvStage.classList.remove('active');
+  scanToggleBtn.textContent = 'Start scanning';
+  scanToggleBtn.classList.remove('stop');
+  recvStatus.textContent = 'Stopped.';
+}
+
+function scanTick() {
+  if (!recvState || !recvState.active) return;
+  if (video.readyState === video.HAVE_ENOUGH_DATA) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (vw && vh) {
+      const scale = Math.min(1, 640 / vw);
+      scanCanvas.width = Math.round(vw * scale);
+      scanCanvas.height = Math.round(vh * scale);
+      scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
+      const imgData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+      const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'dontInvert' });
+      if (code && code.binaryData) handleScannedPacket(new Uint8Array(code.binaryData));
+    }
+  }
+  requestAnimationFrame(scanTick);
+}
+
+function handleScannedPacket(bytes) {
+  const pkt = parsePacket(bytes);
+  if (!pkt) return;
+
+  if (!recvState.session || pkt.transferId !== recvState.session.transferId) {
+    if (recvState.session && recvState.session.decoder.resolvedCount > 0) return; // ignore stray, unrelated code
+    const K = pkt.K;
+    const chunkSize = pkt.type === TYPE_DATA ? pkt.payload.length : pkt.chunkSize;
+    recvState.session = {
+      transferId: pkt.transferId, K, chunkSize,
+      cdf: buildSolitonCDF(K), decoder: new LTDecoder(K, chunkSize),
+      meta: null, framesSeen: 0, startTime: performance.now(), finalized: false,
+    };
+    recvTelemetry.style.display = 'block';
+  }
+
+  const session = recvState.session;
+  session.framesSeen++;
+
+  if (pkt.type === TYPE_META) {
+    session.meta = { fileName: pkt.fileName, fileSize: pkt.fileSize, sha256: pkt.sha256 };
+  } else {
+    const [, indices] = degreeAndIndices(session.K, pkt.seed, session.cdf);
+    session.decoder.addPacket(pkt.seed, indices, pkt.payload);
+  }
+
+  document.getElementById('rChunks').textContent = session.decoder.resolvedCount + ' / ' + session.K;
+  document.getElementById('rProgressFill').style.width = (100 * session.decoder.resolvedCount / session.K).toFixed(1) + '%';
+  document.getElementById('rFrames').textContent = session.framesSeen;
+  document.getElementById('rElapsed').textContent = fmtElapsed(performance.now() - session.startTime);
+
+  if (session.decoder.isComplete() && session.meta && !session.finalized) {
+    session.finalized = true;
+    finalizeReceived(session);
+  }
+}
+
+async function finalizeReceived(session) {
+  const assembled = session.decoder.assemble().slice(0, session.meta.fileSize);
+  const gotHash = new Uint8Array(await crypto.subtle.digest('SHA-256', assembled));
+  const want = session.meta.sha256;
+  const ok = gotHash.length === want.length && gotHash.every((v, i) => v === want[i]);
+
+  const blob = new Blob([assembled]);
+  const url = URL.createObjectURL(blob);
+  saveLink.href = url;
+  saveLink.download = session.meta.fileName;
+  document.getElementById('resultName').textContent = session.meta.fileName + ' · ' + fmtBytes(session.meta.fileSize);
+  const chk = document.getElementById('resultChk');
+  chk.textContent = ok ? 'Checksum verified ✓' : 'Checksum mismatch — file may be corrupted. You can still save it.';
+  chk.className = 'chk ' + (ok ? 'ok' : 'bad');
+  resultCard.classList.add('show');
+  recvStatus.className = 'status-line ok';
+  recvStatus.textContent = 'Transfer complete.';
+
+  stopScanning();
+}
+</script>
+</body>
+</html>
